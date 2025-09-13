@@ -1083,17 +1083,7 @@ function App() {
             createdAt: new Date().toISOString()
         };
 
-        let updatedCommitments = [...fixedCommitments];
-
-        if (!newCommitment.recurring) {
-            // One-time commitments override ALL overlapping recurring occurrences across the set
-            updatedCommitments = applyOneTimeOverridesToRecurring(newCommitment, updatedCommitments);
-        } else {
-            // Recurring commitments should skip ALL dates that overlap with existing one-time commitments
-            newCommitment.deletedOccurrences = computeRecurringDeletedFromOneTimes(newCommitment, updatedCommitments);
-        }
-
-        updatedCommitments = [...updatedCommitments, newCommitment];
+        const updatedCommitments = [...fixedCommitments, newCommitment];
         setFixedCommitments(updatedCommitments);
 
         if (tasks.length > 0) {
@@ -1112,35 +1102,6 @@ function App() {
         // Remove the commitment from the array
         let updatedCommitments = fixedCommitments.filter(commitment => commitment.id !== commitmentId);
 
-        // If deleting a one-time commitment, restore any overridden recurring commitments
-        if (commitmentToDelete && !commitmentToDelete.recurring && commitmentToDelete.specificDates) {
-            // Find recurring commitments that may have been overridden by this one-time commitment
-            updatedCommitments = updatedCommitments.map(commitment => {
-                if (!commitment.recurring || !commitment.deletedOccurrences) {
-                    return commitment; // Skip non-recurring or commitments without deleted occurrences
-                }
-
-                // Check if this recurring commitment has any dates that were overridden by the deleted one-time commitment
-                const deletedDatesToRestore = commitmentToDelete.specificDates?.filter(date => {
-                    const dayOfWeek = new Date(date).getDay();
-                    // Check if the date matches this recurring commitment's schedule and is in deletedOccurrences
-                    return commitment.daysOfWeek.includes(dayOfWeek) &&
-                           commitment.deletedOccurrences?.includes(date);
-                }) || [];
-
-                // If there are dates to restore, remove them from deletedOccurrences
-                if (deletedDatesToRestore.length > 0) {
-                    return {
-                        ...commitment,
-                        deletedOccurrences: commitment.deletedOccurrences.filter(date =>
-                            !deletedDatesToRestore.includes(date)
-                        )
-                    };
-                }
-
-                return commitment;
-            });
-        }
 
         setFixedCommitments(updatedCommitments);
         
@@ -1191,34 +1152,6 @@ function App() {
             commitment.id === commitmentId ? { ...commitment, ...updates } : commitment
         );
 
-        // If updating a one-time commitment, first restore previously overridden recurring occurrences
-        if (originalCommitment && !originalCommitment.recurring && originalCommitment.specificDates) {
-            updatedCommitments = updatedCommitments.map(commitment => {
-                if (!commitment.recurring || !commitment.deletedOccurrences) return commitment;
-                const previouslyOverriddenDates = originalCommitment.specificDates?.filter(date => {
-                    const dayOfWeek = new Date(date).getDay();
-                    return commitment.daysOfWeek.includes(dayOfWeek) && commitment.deletedOccurrences?.includes(date);
-                }) || [];
-                if (previouslyOverriddenDates.length > 0) {
-                    return {
-                        ...commitment,
-                        deletedOccurrences: commitment.deletedOccurrences.filter(date => !previouslyOverriddenDates.includes(date))
-                    };
-                }
-                return commitment;
-            });
-        }
-
-        // Recompute overrides comprehensively
-        const cur = updatedCommitments.find(c => c.id === commitmentId);
-        if (cur) {
-            if (!cur.recurring) {
-                updatedCommitments = applyOneTimeOverridesToRecurring(cur, updatedCommitments);
-            } else {
-                const newDeleted = computeRecurringDeletedFromOneTimes(cur, fixedCommitments);
-                updatedCommitments = updatedCommitments.map(c => c.id === commitmentId ? { ...c, deletedOccurrences: newDeleted } : c);
-            }
-        }
 
         setFixedCommitments(updatedCommitments);
 
