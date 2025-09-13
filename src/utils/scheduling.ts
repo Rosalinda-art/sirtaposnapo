@@ -3326,12 +3326,12 @@ export const checkCommitmentConflicts = (
       startDate: string;
       endDate: string;
     };
-    type?: string; // Added type to check for all-day events
+    type?: string;
   },
   existingCommitments: FixedCommitment[],
-  excludeCommitmentId?: string // For editing, exclude the commitment being edited
-): { 
-  hasConflict: boolean; 
+  excludeCommitmentId?: string
+): {
+  hasConflict: boolean;
   conflictingCommitment?: FixedCommitment;
   conflictType?: 'strict' | 'override';
   conflictingDates?: string[];
