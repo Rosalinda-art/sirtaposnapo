@@ -735,18 +735,18 @@ const CalendarView: React.FC<CalendarViewProps> = ({
     return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
   };
 
-  // Find nearest available slot for a commitment move, avoiding overlaps with study sessions and other commitments
+  // Find nearest available slot for a commitment move, blocking ONLY study sessions (commitments may overlap)
   const findNearestAvailableSlotForCommitment = (
     targetStart: Date,
     durationHours: number,
     targetDate: string,
-    movingCommitment: FixedCommitment
+    _movingCommitment: FixedCommitment
   ): { start: Date; end: Date } | null => {
     if (!settings) return null;
 
     const bufferTimeMs = (settings.bufferTimeBetweenSessions || 0) * 60 * 1000;
 
-    // Gather busy slots on target date (commitments AND study sessions)
+    // Gather busy slots on target date (study sessions only)
     const busy: Array<{ start: Date; end: Date }> = [];
 
     // Study sessions (block commitments from overlapping sessions)
@@ -760,47 +760,11 @@ const CalendarView: React.FC<CalendarViewProps> = ({
       });
     });
 
-    // Commitments
-    fixedCommitments.forEach(c => {
-      if (!doesCommitmentApplyToDate(c, targetDate)) return;
-      // Skip the moving commitment on this date (avoid self-conflict)
-      if (c.id === movingCommitment.id) return;
-
-      // Determine actual times on this date
-      const mod = c.modifiedOccurrences?.[targetDate];
-      const isAllDay = mod?.isAllDay ?? c.isAllDay;
-      if (isAllDay) {
-        // All-day commitments should NOT block the time grid
-        return;
-      }
-      let startStr: string | undefined;
-      let endStr: string | undefined;
-      if (mod?.startTime && mod?.endTime) {
-        startStr = mod.startTime;
-        endStr = mod.endTime;
-      } else if (c.useDaySpecificTiming && c.daySpecificTimings) {
-        const dow = new Date(targetDate).getDay();
-        const t = c.daySpecificTimings.find(t => t.dayOfWeek === dow);
-        if (t && !t.isAllDay) {
-          startStr = t.startTime;
-          endStr = t.endTime;
-        }
-      } else {
-        startStr = c.startTime;
-        endStr = c.endTime;
-      }
-      if (startStr && endStr) {
-        const s = moment(`${targetDate} ${startStr}`).toDate();
-        const e = moment(`${targetDate} ${endStr}`).toDate();
-        busy.push({ start: s, end: e });
-      }
-    });
-
     busy.sort((a, b) => a.start.getTime() - b.start.getTime());
 
     // Boundaries: full day (commitments can be outside study window)
-    const dayStart = moment(targetDate).hour(0).minute(0).second(0).toDate();
-    const dayEnd = moment(targetDate).hour(23).minute(59).second(59).toDate();
+    const dayStart = moment(targetDate).startOf('day').toDate();
+    const dayEnd = moment(targetDate).endOf('day').toDate();
 
     const durMs = durationHours * 60 * 60 * 1000;
 
@@ -867,12 +831,12 @@ const CalendarView: React.FC<CalendarViewProps> = ({
     return { isAllDay: false };
   };
 
-  // Variant that accepts extra busy blocks and excludes specific commitments (by id)
+  // Variant that accepts extra busy blocks (study sessions only). Commitments may overlap and are not considered busy.
   const findNearestSlotForCommitmentWithBusy = (
     targetStart: Date,
     durationHours: number,
     targetDate: string,
-    excludeCommitmentIds: Set<string>,
+    _excludeCommitmentIds: Set<string>,
     extraBusy: Array<{ start: Date; end: Date }>
   ): { start: Date; end: Date } | null => {
     if (!settings) return null;
@@ -889,15 +853,6 @@ const CalendarView: React.FC<CalendarViewProps> = ({
         const sEnd = moment(`${targetDate} ${s.endTime}`).toDate();
         busy.push({ start: sStart, end: sEnd });
       });
-    });
-
-    // Block other commitments not excluded (skip all-day, they don't block grid)
-    fixedCommitments.forEach(c => {
-      if (excludeCommitmentIds.has(c.id)) return;
-      if (!doesCommitmentApplyToDate(c, targetDate)) return;
-      const t = getCommitmentTimeOnDate(c, targetDate);
-      if (t.isAllDay || !t.start || !t.end) return;
-      busy.push({ start: t.start, end: t.end });
     });
 
     // Add extra busy intervals (already placed blocks)
@@ -2490,33 +2445,10 @@ const CalendarView: React.FC<CalendarViewProps> = ({
                     const durH = (dropEnd.getTime() - dropStart.getTime()) / (1000 * 60 * 60);
                     const placed = { start: dropStart, end: new Date(dropStart.getTime() + durH * 60 * 60 * 1000) };
 
-                    // Cascade overlapping commitments first
-                    const overlaps = fixedCommitments
-                      .filter(c => c.id !== commitment.id && doesCommitmentApplyToDate(c, targetDate))
-                      .map(c => ({ c, t: getCommitmentTimeOnDate(c, targetDate) }))
-                      .filter(({ t }) => t.start && t.end && !t.isAllDay)
-                      .filter(({ t }) => placed.start < (t.end as Date) && placed.end > (t.start as Date));
-
+                    // We allow commitments to overlap. Only move overlapping TASK SESSIONS.
                     const extraBusy: Array<{ start: Date; end: Date }> = [{ start: placed.start, end: placed.end }];
-                    const commitmentRelocations: Array<{ id: string; start: Date; end: Date }> = [];
 
-                    overlaps.sort((a, b) => Math.abs((a.t.start as Date).getTime() - placed.start.getTime()) - Math.abs((b.t.start as Date).getTime() - placed.start.getTime()));
-
-                    for (const { c, t } of overlaps) {
-                      const durH2 = ((t!.end as Date).getTime() - (t!.start as Date).getTime()) / (1000 * 60 * 60);
-                      const targetStartForThis = t!.start as Date;
-                      const slot2 = findNearestSlotForCommitmentWithBusy(targetStartForThis, durH2, targetDate, new Set<string>([commitment.id, c.id]), extraBusy);
-                      if (!slot2) {
-                        setDragFeedback('Unable to move one or more commitments');
-                        setTimeout(() => setDragFeedback(''), 3000);
-                        setPendingSessionCascade(null);
-                        return;
-                      }
-                      commitmentRelocations.push({ id: c.id, start: slot2.start, end: slot2.end });
-                      extraBusy.push({ start: slot2.start, end: slot2.end });
-                    }
-
-                    // Precompute new slots for all overlapping sessions (respect extraBusy incl. new commitments)
+                    // Precompute new slots for all overlapping sessions (respect extraBusy incl. new commitment)
                     const sessionMoves: Array<{ taskId: string; sessionNumber?: number; start: Date; end: Date }> = [];
                     const plan = studyPlans.find(p => p.date === targetDate);
                     if (!plan) { setPendingSessionCascade(null); return; }
@@ -2550,23 +2482,6 @@ const CalendarView: React.FC<CalendarViewProps> = ({
                     } as NonNullable<FixedCommitment['modifiedOccurrences']>;
                     onUpdateCommitment(commitment.id, { modifiedOccurrences: mods });
 
-                    // Apply commitment relocations
-                    commitmentRelocations.forEach(r => {
-                      const c = fixedCommitments.find(x => x.id === r.id);
-                      if (!c) return;
-                      const mods2 = {
-                        ...(c.modifiedOccurrences || {}),
-                        [targetDate]: {
-                          startTime: moment(r.start).format('HH:mm'),
-                          endTime: moment(r.end).format('HH:mm'),
-                          title: c.title,
-                          category: c.category,
-                          isAllDay: false,
-                        }
-                      } as NonNullable<FixedCommitment['modifiedOccurrences']>;
-                      onUpdateCommitment(c.id, { modifiedOccurrences: mods2 });
-                    });
-
                     // Apply session moves atomically
                     const updatedPlans = studyPlans.map(p => {
                       if (p.date !== targetDate) return p;
@@ -2589,7 +2504,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({
                     });
 
                     onUpdateStudyPlans(updatedPlans);
-                    setDragFeedback(`✅ Placed at ${finalStart}; moved ${commitmentRelocations.length} commitment(s) and ${sessionMoves.length} session(s)`);
+                    setDragFeedback(`✅ Placed at ${finalStart}; moved ${sessionMoves.length} session(s)`);
                     setTimeout(() => setDragFeedback(''), 4000);
                     setPendingSessionCascade(null);
                   }}

@@ -3326,22 +3326,19 @@ export const checkCommitmentConflicts = (
       startDate: string;
       endDate: string;
     };
-    type?: string; // Added type to check for all-day events
+    type?: string;
   },
   existingCommitments: FixedCommitment[],
-  excludeCommitmentId?: string // For editing, exclude the commitment being edited
-): { 
-  hasConflict: boolean; 
+  excludeCommitmentId?: string
+): {
+  hasConflict: boolean;
   conflictingCommitment?: FixedCommitment;
   conflictType?: 'strict' | 'override';
   conflictingDates?: string[];
 } => {
-  // Convert time strings to minutes for easier comparison
-  const timeToMinutes = (timeStr?: string): number => {
-    if (!timeStr) return 0; // For all-day events
-    const [hours, minutes] = timeStr.split(':').map(Number);
-    return (hours || 0) * 60 + (minutes || 0);
-  };
+  // Overlap policy: commitments may overlap with other commitments (recurring or one-time)
+  // Therefore we do not flag time conflicts between commitments.
+  return { hasConflict: false };
 
   // For all-day events, use full day time range (00:00 to 23:59)
   const newStartMinutes = newCommitment.isAllDay ? 0 : timeToMinutes(newCommitment.startTime);
