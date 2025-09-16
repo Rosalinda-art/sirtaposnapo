@@ -471,9 +471,9 @@ const optimizeSessionDistribution = (task: Task, totalHours: number, daysForTask
     return [totalHours];
   }
 
-  // If task has a preferred session duration (from session-based estimation), use it
-  if (task.preferredSessionDuration && task.preferredSessionDuration > 0) {
-    const preferredDuration = task.preferredSessionDuration;
+  // If task has a session-based duration preference, use it
+  if (task.sessionDuration && task.sessionDuration > 0) {
+    const preferredDuration = task.sessionDuration;
     const numNeededSessions = Math.ceil(totalHours / preferredDuration);
 
     // If we have enough days for the needed sessions, use preferred duration
