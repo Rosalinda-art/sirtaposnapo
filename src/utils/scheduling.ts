@@ -2851,12 +2851,25 @@ export const moveIndividualSession = (
       newSession.endTime = `${endHour.toString().padStart(2, '0')}:${endMinute.toString().padStart(2, '0')}`;
       
       todayPlan.plannedTasks.push(newSession);
-      
-      return { 
-        updatedPlans, 
-        success: true, 
-        newTime: newSession.startTime, 
-        newDate: today 
+
+      // Remove the original session from its original plan to avoid duplicates
+      const originalPlan = updatedPlans.find(p => p.date === originalPlanDate);
+      if (originalPlan) {
+        const originalIdx = originalPlan.plannedTasks.findIndex(s => (
+          s.taskId === session.taskId &&
+          (s.sessionNumber === session.sessionNumber || (s.startTime === session.startTime && s.endTime === session.endTime))
+        ));
+        if (originalIdx !== -1) {
+          originalPlan.plannedTasks.splice(originalIdx, 1);
+          originalPlan.totalStudyHours = Math.max(0, Math.round((originalPlan.totalStudyHours - (session.allocatedHours || 0)) * 60) / 60);
+        }
+      }
+
+      return {
+        updatedPlans,
+        success: true,
+        newTime: newSession.startTime,
+        newDate: today
       };
     }
   }
@@ -2900,6 +2913,19 @@ export const applyUserReschedules = (
       newSession.status = 'rescheduled';
       
       targetPlan.plannedTasks.push(newSession);
+
+      // Remove the original session from its source plan to prevent duplicates
+      if (originalPlan) {
+        const idx = originalPlan.plannedTasks.findIndex(s => (
+          s.taskId === reschedule.taskId &&
+          (s.sessionNumber === reschedule.sessionNumber || (s.startTime === reschedule.originalStartTime && s.endTime === reschedule.originalEndTime))
+        ));
+        if (idx !== -1) {
+          originalPlan.plannedTasks.splice(idx, 1);
+          originalPlan.totalStudyHours = Math.max(0, Math.round((originalPlan.totalStudyHours - (originalSession.allocatedHours || 0)) * 60) / 60);
+        }
+      }
+
       validReschedules.push(reschedule);
     }
   }
@@ -3695,7 +3721,11 @@ export const preserveManualSchedules = (
             if (targetPlan) {
               // Move session to the correct plan
               targetPlan.plannedTasks.push(session);
-              plan.plannedTasks = plan.plannedTasks.filter(s => s !== session);
+              // Remove by identity keys instead of reference equality to avoid duplicates
+              plan.plannedTasks = plan.plannedTasks.filter(s => !(
+                s.taskId === session.taskId &&
+                s.sessionNumber === session.sessionNumber
+              ));
             }
           }
         }
@@ -3734,7 +3764,10 @@ export const preserveManualSchedules = (
       const isFixed = prevSession.done || prevSession.status === 'completed' || prevSession.status === 'skipped';
       if (!isFixed) return;
 
-      const existsInNew = targetPlan.plannedTasks.some(s => s.taskId === prevSession.taskId && s.sessionNumber === prevSession.sessionNumber);
+      const existsInNew = targetPlan.plannedTasks.some(s => (
+        (s.taskId === prevSession.taskId && s.sessionNumber === prevSession.sessionNumber) ||
+        (s.taskId === prevSession.taskId && s.startTime === prevSession.startTime && s.endTime === prevSession.endTime)
+      ));
       if (!existsInNew) {
         // Append the fixed session exactly as it was to preserve user intent
         targetPlan.plannedTasks.push({ ...prevSession });
@@ -3780,7 +3813,10 @@ const preserveFixedSessionsPostProcessing = (
       const isFixed = prevSession.done || prevSession.status === 'completed' || prevSession.status === 'skipped';
       if (!isFixed) return;
 
-      const idx = targetPlan!.plannedTasks.findIndex(s => s.taskId === prevSession.taskId && s.sessionNumber === prevSession.sessionNumber);
+      const idx = targetPlan!.plannedTasks.findIndex(s => (
+    (s.taskId === prevSession.taskId && s.sessionNumber === prevSession.sessionNumber) ||
+    (s.taskId === prevSession.taskId && s.startTime === prevSession.startTime && s.endTime === prevSession.endTime)
+  ));
       if (idx === -1) {
         targetPlan!.plannedTasks.push({ ...prevSession });
         targetPlan!.totalStudyHours = Math.round((targetPlan!.totalStudyHours + prevSession.allocatedHours) * 60) / 60;
