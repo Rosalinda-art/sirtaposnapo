@@ -783,6 +783,17 @@ function validateSessionTimes(
 }
 
 // Strictly resolve any overlaps or insufficient buffer between consecutive sessions on a day
+// Helper to dedupe exact duplicate sessions on a plan (same taskId, start/end, status)
+function dedupeSessionsOnPlan(plan: StudyPlan) {
+  const seen = new Set<string>();
+  plan.plannedTasks = plan.plannedTasks.filter(s => {
+    const key = `${s.taskId}|${s.startTime}|${s.endTime}|${s.status}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function fixMicroOverlapsOnDay(plan: StudyPlan, settings: UserSettings) {
   const toMin = (t: string) => {
     const [h, m] = t.split(':').map(Number);
@@ -3776,6 +3787,8 @@ export const preserveManualSchedules = (
     });
   });
 
+  // Final safety: remove exact duplicates within each plan
+  newPlans.forEach(dedupeSessionsOnPlan);
   return newPlans;
 };
 
@@ -4343,6 +4356,8 @@ export const generateNewStudyPlanWithPreservation = (
   // FINAL SAFETY PASS: ensure all previously completed/skipped sessions are preserved exactly as-is
   const finalPlans = preserveFixedSessionsPostProcessing(smoothedPlans, existingStudyPlans);
 
+  // Final safety: remove exact duplicates within each plan
+  finalPlans.forEach(dedupeSessionsOnPlan);
   return {
     plans: finalPlans,
     suggestions: result.suggestions
