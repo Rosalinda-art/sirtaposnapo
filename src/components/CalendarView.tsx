@@ -587,6 +587,42 @@ const CalendarView: React.FC<CalendarViewProps> = ({
     }
   };
 
+  const handleStartSelectedSession = () => {
+    if (!selectedEvent || selectedEvent.resource.type !== 'study' || !onSelectTask) { setSelectedEvent(null); return; }
+    const session = selectedEvent.resource.data as StudySession;
+    const task = tasks.find(t => t.id === session.taskId);
+    const planDate = selectedEvent.resource.planDate || moment(selectedEvent.start).format('YYYY-MM-DD');
+    const allocatedHours = moment(selectedEvent.end).diff(moment(selectedEvent.start), 'hours', true);
+    if (task) {
+      onSelectTask(task, { allocatedHours, planDate, sessionNumber: session.sessionNumber });
+    }
+    setSelectedEvent(null);
+  };
+
+  const handleSkipSelectedSession = () => {
+    if (!selectedEvent || selectedEvent.resource.type !== 'study' || !onUpdateStudyPlans) { setSelectedEvent(null); return; }
+    const session = selectedEvent.resource.data as StudySession;
+    const planDate = selectedEvent.resource.planDate || moment(selectedEvent.start).format('YYYY-MM-DD');
+    const updatedPlans = studyPlans.map(p => {
+      if (p.date !== planDate) return p;
+      return {
+        ...p,
+        plannedTasks: p.plannedTasks.map(s => {
+          if (s.taskId === session.taskId && s.sessionNumber === session.sessionNumber) {
+            return {
+              ...s,
+              status: 'skipped' as const,
+              skipMetadata: { skippedAt: new Date().toISOString(), reason: 'user_choice' }
+            };
+          }
+          return s;
+        })
+      };
+    });
+    onUpdateStudyPlans(updatedPlans);
+    setSelectedEvent(null);
+  };
+
   // Utility function to find available time slots with precise placement
   const findNearestAvailableSlot = (
     targetStart: Date,
