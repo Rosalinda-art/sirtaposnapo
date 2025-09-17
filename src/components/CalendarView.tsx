@@ -180,6 +180,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({
     overlappingSessionIds: Array<{ taskId: string; sessionNumber?: number }>;
   }>(null);
 
+  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
 
   // Persist calendar view to localStorage
   useEffect(() => {
