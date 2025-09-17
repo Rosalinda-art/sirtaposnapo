@@ -572,38 +572,18 @@ const CalendarView: React.FC<CalendarViewProps> = ({
   const handleSelectEvent = (event: CalendarEvent) => {
     if (event.resource.type === 'study') {
       const session = event.resource.data as StudySession;
-      // Prevent clicking on done sessions
-      if (session.done) return;
-      const today = getLocalDateString();
-      // Always use planDate from event.resource, fallback to event.start if missing
-      let planDate = event.resource.planDate;
-      if (!planDate && event.start) {
-        planDate = event.start.toISOString().split('T')[0];
-      }
-      if ((planDate === today)) {
-        if (onSelectTask) {
-          onSelectTask(tasks.find(t => t.id === session.taskId)!, {
-            allocatedHours: moment(event.end).diff(moment(event.start), 'hours', true),
-            planDate: planDate,
-            sessionNumber: session.sessionNumber
-          });
-        }
-      }
-      // Otherwise, do nothing (not clickable)
+      if (session.done || session.status === 'completed' || session.status === 'skipped') return;
+      setSelectedEvent(event);
     } else if (event.resource.type === 'commitment') {
       const commitment = event.resource.data as FixedCommitment;
       const today = getLocalDateString();
       const commitmentDate = moment(event.start).format('YYYY-MM-DD');
-
-      // Check if this is a manual rescheduled session
       if (commitment.title.includes('(Manual Resched)')) {
         setSelectedManualSession(commitment);
       } else if (onSelectCommitment && commitmentDate === today) {
-        // Handle clicks on commitments for current day: open timer
         const duration = moment(event.end).diff(moment(event.start), 'hours', true);
         onSelectCommitment(commitment, duration);
       }
-      // Otherwise, do nothing (not clickable for non-current days)
     }
   };
 
