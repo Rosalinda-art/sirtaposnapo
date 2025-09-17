@@ -781,21 +781,54 @@ const MobileCalendarView: React.FC<MobileCalendarViewProps> = ({
                   </>
                 )}
                 
-                {selectedEvent.resource.type === 'study' && onSelectTask && (
-                  <button
-                    onClick={() => {
-                      onSelectTask(selectedEvent.resource.data.task, {
-                        allocatedHours: selectedEvent.resource.data.session.allocatedHours,
-                        planDate: moment(selectedDate).format('YYYY-MM-DD'),
-                        sessionNumber: selectedEvent.resource.data.session.sessionNumber
-                      });
-                      setSelectedEvent(null);
-                    }}
-                    className="w-full bg-blue-500 text-white py-3 px-4 rounded-lg hover:bg-blue-600 transition-colors flex items-center justify-center space-x-2"
-                  >
-                    <Play size={16} />
-                    <span>Start Study Session</span>
-                  </button>
+                {selectedEvent.resource.type === 'study' && (
+                  <div className="w-full space-y-2">
+                    {onSelectTask && (
+                      <button
+                        onClick={() => {
+                          onSelectTask(selectedEvent.resource.data.task, {
+                            allocatedHours: selectedEvent.resource.data.session.allocatedHours,
+                            planDate: moment(selectedDate).format('YYYY-MM-DD'),
+                            sessionNumber: selectedEvent.resource.data.session.sessionNumber
+                          });
+                          setSelectedEvent(null);
+                        }}
+                        className="w-full bg-blue-500 text-white py-3 px-4 rounded-lg hover:bg-blue-600 transition-colors flex items-center justify-center space-x-2"
+                      >
+                        <Play size={16} />
+                        <span>Start Study Session</span>
+                      </button>
+                    )}
+                    {onUpdateStudyPlans && (
+                      <button
+                        onClick={() => {
+                          const planDate = moment(selectedDate).format('YYYY-MM-DD');
+                          const session = selectedEvent.resource.data.session as StudySession;
+                          const updatedPlans = studyPlans.map(p => {
+                            if (p.date !== planDate) return p;
+                            return {
+                              ...p,
+                              plannedTasks: p.plannedTasks.map(s => {
+                                if (s.taskId === session.taskId && s.sessionNumber === session.sessionNumber) {
+                                  return {
+                                    ...s,
+                                    status: 'skipped' as const,
+                                    skipMetadata: { skippedAt: new Date().toISOString(), reason: 'user_choice' }
+                                  };
+                                }
+                                return s;
+                              })
+                            };
+                          });
+                          onUpdateStudyPlans(updatedPlans);
+                          setSelectedEvent(null);
+                        }}
+                        className="w-full bg-red-500 text-white py-3 px-4 rounded-lg hover:bg-red-600 transition-colors flex items-center justify-center"
+                      >
+                        <span>Skip this session</span>
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

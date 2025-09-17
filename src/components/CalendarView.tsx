@@ -180,6 +180,8 @@ const CalendarView: React.FC<CalendarViewProps> = ({
     overlappingSessionIds: Array<{ taskId: string; sessionNumber?: number }>;
   }>(null);
 
+  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
+  const [selectedCommitmentEvent, setSelectedCommitmentEvent] = useState<CalendarEvent | null>(null);
 
   // Persist calendar view to localStorage
   useEffect(() => {
@@ -571,39 +573,71 @@ const CalendarView: React.FC<CalendarViewProps> = ({
   const handleSelectEvent = (event: CalendarEvent) => {
     if (event.resource.type === 'study') {
       const session = event.resource.data as StudySession;
-      // Prevent clicking on done sessions
-      if (session.done) return;
-      const today = getLocalDateString();
-      // Always use planDate from event.resource, fallback to event.start if missing
-      let planDate = event.resource.planDate;
-      if (!planDate && event.start) {
-        planDate = event.start.toISOString().split('T')[0];
-      }
-      if ((planDate === today)) {
-        if (onSelectTask) {
-          onSelectTask(tasks.find(t => t.id === session.taskId)!, {
-            allocatedHours: moment(event.end).diff(moment(event.start), 'hours', true),
-            planDate: planDate,
-            sessionNumber: session.sessionNumber
-          });
-        }
-      }
-      // Otherwise, do nothing (not clickable)
+      if (session.done || session.status === 'completed' || session.status === 'skipped') return;
+      setSelectedEvent(event);
     } else if (event.resource.type === 'commitment') {
       const commitment = event.resource.data as FixedCommitment;
-      const today = getLocalDateString();
-      const commitmentDate = moment(event.start).format('YYYY-MM-DD');
-
-      // Check if this is a manual rescheduled session
       if (commitment.title.includes('(Manual Resched)')) {
         setSelectedManualSession(commitment);
-      } else if (onSelectCommitment && commitmentDate === today) {
-        // Handle clicks on commitments for current day: open timer
-        const duration = moment(event.end).diff(moment(event.start), 'hours', true);
-        onSelectCommitment(commitment, duration);
+      } else {
+        setSelectedCommitmentEvent(event);
       }
-      // Otherwise, do nothing (not clickable for non-current days)
     }
+  };
+
+  const handleStartSelectedSession = () => {
+    if (!selectedEvent || selectedEvent.resource.type !== 'study' || !onSelectTask) { setSelectedEvent(null); return; }
+    const session = selectedEvent.resource.data as StudySession;
+    const task = tasks.find(t => t.id === session.taskId);
+    const planDate = selectedEvent.resource.planDate || moment(selectedEvent.start).format('YYYY-MM-DD');
+    const allocatedHours = moment(selectedEvent.end).diff(moment(selectedEvent.start), 'hours', true);
+    if (task) {
+      onSelectTask(task, { allocatedHours, planDate, sessionNumber: session.sessionNumber });
+    }
+    setSelectedEvent(null);
+  };
+
+  const handleSkipSelectedSession = () => {
+    if (!selectedEvent || selectedEvent.resource.type !== 'study' || !onUpdateStudyPlans) { setSelectedEvent(null); return; }
+    const session = selectedEvent.resource.data as StudySession;
+    const planDate = selectedEvent.resource.planDate || moment(selectedEvent.start).format('YYYY-MM-DD');
+    const updatedPlans = studyPlans.map(p => {
+      if (p.date !== planDate) return p;
+      return {
+        ...p,
+        plannedTasks: p.plannedTasks.map(s => {
+          if (s.taskId === session.taskId && s.sessionNumber === session.sessionNumber) {
+            return {
+              ...s,
+              status: 'skipped' as const,
+              skipMetadata: { skippedAt: new Date().toISOString(), reason: 'user_choice' }
+            };
+          }
+          return s;
+        })
+      };
+    });
+    onUpdateStudyPlans(updatedPlans);
+    setSelectedEvent(null);
+  };
+
+  const handleStartSelectedCommitment = () => {
+    if (!selectedCommitmentEvent || selectedCommitmentEvent.resource.type !== 'commitment' || !onStartManualSession) { setSelectedCommitmentEvent(null); return; }
+    const commitment = selectedCommitmentEvent.resource.data as FixedCommitment;
+    const durationSeconds = Math.max(0, moment(selectedCommitmentEvent.end).diff(moment(selectedCommitmentEvent.start), 'seconds'));
+    onStartManualSession(commitment, durationSeconds);
+    setSelectedCommitmentEvent(null);
+  };
+
+  const handleSkipSelectedCommitment = () => {
+    if (!selectedCommitmentEvent || selectedCommitmentEvent.resource.type !== 'commitment' || !onUpdateCommitment) { setSelectedCommitmentEvent(null); return; }
+    const commitment = selectedCommitmentEvent.resource.data as FixedCommitment;
+    const dateString = moment(selectedCommitmentEvent.start).format('YYYY-MM-DD');
+    const existing = commitment.deletedOccurrences || [];
+    if (!existing.includes(dateString)) {
+      onUpdateCommitment(commitment.id, { deletedOccurrences: [...existing, dateString] });
+    }
+    setSelectedCommitmentEvent(null);
   };
 
   // Utility function to find available time slots with precise placement
@@ -1140,7 +1174,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({
         plannedTasks: [newSession],
         totalStudyHours: sessionDuration,
         isOverloaded: false,
-        availableHours: getDaySpecificDailyHours(newPlanDate, settings)
+        availableHours: getDaySpecificDailyHours(targetDate, settings)
       });
 
       // Also remove from original plan if it exists
@@ -2376,6 +2410,72 @@ const CalendarView: React.FC<CalendarViewProps> = ({
                   className="w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
                   onClick={() => setPendingCommitmentMove(null)}
                 >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Start/Skip Study Session Modal */}
+      {selectedEvent && selectedEvent.resource.type === 'study' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setSelectedEvent(null)}>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full mx-4" onClick={e => e.stopPropagation()}>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-800 dark:text-white">Study Session</h2>
+                <button onClick={() => setSelectedEvent(null)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="text-sm text-gray-700 dark:text-gray-300 space-y-1 mb-4">
+                <div className="font-medium">{selectedEvent.title}</div>
+                <div>{moment(selectedEvent.start).format('ddd, MMM D')} • {moment(selectedEvent.start).format('HH:mm')} - {moment(selectedEvent.end).format('HH:mm')}</div>
+              </div>
+              <div className="space-y-2">
+                <button className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700" onClick={handleStartSelectedSession}>
+                  Start session
+                </button>
+                <button className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700" onClick={handleSkipSelectedSession}>
+                  Skip this session for {moment(selectedEvent.start).format('MMM D')}
+                </button>
+                <button className="w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600" onClick={() => setSelectedEvent(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Start/Skip Commitment Modal */}
+      {selectedCommitmentEvent && selectedCommitmentEvent.resource.type === 'commitment' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setSelectedCommitmentEvent(null)}>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full mx-4" onClick={e => e.stopPropagation()}>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-800 dark:text-white">Commitment</h2>
+                <button onClick={() => setSelectedCommitmentEvent(null)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="text-sm text-gray-700 dark:text-gray-300 space-y-1 mb-4">
+                <div className="font-medium">{selectedCommitmentEvent.title}</div>
+                <div>{moment(selectedCommitmentEvent.start).format('ddd, MMM D')} • {moment(selectedCommitmentEvent.start).format('HH:mm')} - {moment(selectedCommitmentEvent.end).format('HH:mm')}</div>
+              </div>
+              <div className="space-y-2">
+                {onStartManualSession && (
+                  <button className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700" onClick={handleStartSelectedCommitment}>
+                    Start session
+                  </button>
+                )}
+                {onUpdateCommitment && (
+                  <button className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700" onClick={handleSkipSelectedCommitment}>
+                    Skip this occurrence for {moment(selectedCommitmentEvent.start).format('MMM D')}
+                  </button>
+                )}
+                <button className="w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600" onClick={() => setSelectedCommitmentEvent(null)}>
                   Cancel
                 </button>
               </div>
